@@ -5,6 +5,7 @@ export const authorizationOptions: AsyncMetadata = {
     inject: [SessionService],
     useFactory: (sessionService: SessionService): Authenticator => ({
         allowNoRulesAccess: (context) => sessionService.allowNoRulesAccess(context),
-        retrieveUser: (context) => sessionService.retrieveUser(context),
+        // FIX: Cast to 'any' to satisfy the compiler while sending the sanitized user to the validator
+        retrieveUser: (context) => sessionService.retrieveUser(context) as any,
     })
 }
