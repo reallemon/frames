@@ -196,31 +196,31 @@ export class SessionService {
             context.getSocketContext().user?.assigns.token ?? null;
 
         const sessionToken = token?.replace('Bearer', '').trim() || null;
-        
-        if (!sessionToken) console.log('>>> AUTH DEBUG: No session token found in request');
 
         return TaskEither
             .fromNullable(sessionToken)
             .ioSync((token) => context.addData(SESSION_COOKIE_NAME, token))
             .chain((token) => this.retrieveSession(token))
             .map((session) => {
-                console.log('>>> DEBUG: retrieveSession Success. Adding to context...');
-                // DEBUG: Try adding to context inside a try-catch to spot serialization errors
-                try {
-                    context.addData(SESSION_CONTEXT_KEY, session);
-                    console.log('>>> DEBUG: Context add success.');
-                } catch (e) {
-                    console.error('>>> DEBUG: CRITICAL CONTEXT ERROR:', e);
-                    throw e;
-                }
+                // Fix: context.addData can fail if the object contains functions, 
+                // but our retrieveSession fix (stripping defaultObject) handles that.
+                context.addData(SESSION_CONTEXT_KEY, session);
                 return session;
             })
             .map((session) => {
-                 console.log(`>>> DEBUG: Returning User: ${session.user.username} (Role: ${session.user.role})`);
-                 return session.user;
+                // --- CRITICAL FIX: CONSTRUCT VALID CLIENT USER ---
+                // We must merge the 'browserId' from the Session into the User object
+                // because the ClientUserSchema requires it.
+                const clientUser = {
+                    ...session.user,
+                    browserId: session.browserId, 
+                };
+
+                console.log(`>>> DEBUG: returning ClientUser with BrowserID: ${clientUser.browserId}`);
+                return clientUser;
             })
             .mapError((err) => {
-                console.error('>>> DEBUG: retrieveUser FAILED chain:', err);
+                console.error('>>> DEBUG: retrieveUser failed:', err);
                 return err;
             });
     }
