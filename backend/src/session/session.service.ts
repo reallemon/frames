@@ -197,6 +197,9 @@ export class SessionService {
 
         const sessionToken = token?.replace('Bearer', '').trim() || null;
 
+        if (!sessionToken) console.log('>>> AUTH DEBUG: No session token found in request');
+        else console.log('>>> AUTH DEBUG: Token found, attempting verification...');
+        
         return TaskEither
             .fromNullable(sessionToken)
             .ioSync((token) => context.addData(SESSION_COOKIE_NAME, token))
