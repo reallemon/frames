@@ -219,6 +219,7 @@ export class SessionService {
     }
 
     private retrieveSession (sessionToken: string) {
+        // 1. Synchronous: Verify Token & Parse Cookie
         return Either.tryCatch(() => {
             try {
                 return this.jwtService.verify<Cookie>(sessionToken);
@@ -227,17 +228,33 @@ export class SessionService {
                 throw e;
             }
         }, 'Invalid token')
-            .chain((cookie) => Either.tryCatch(() => cookieSchema.parse(cookie), 'Invalid cookie').toTaskEither())
+            .chain((cookie) => Either.tryCatch(() => {
+                try {
+                    return cookieSchema.parse(cookie);
+                } catch (e) {
+                    console.error('>>> DEBUG: Cookie schema validation failed:', e);
+                    throw e;
+                }
+            }, 'Invalid cookie'))
+            .toTaskEither() // <--- Convert to Async Task here
+            
+            // 2. Asynchronous: Fetch Session from Redis
             .chain(({ userId, sessionId }) => {
-                return this.cacheStore.get<TempSession>(`${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`);
+                const key = `${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`;
+                console.log(`>>> DEBUG: Searching Redis for key: ${key}`);
+                return this.cacheStore.get<TempSession>(key)
+                    .mapError((e) => {
+                        console.error(`>>> DEBUG: Redis lookup failed: ${e}`);
+                        return e;
+                    });
             })
-            .map((session) => {
-                // --- FIX START: Safe Language Handling ---
-                // 1. Log what is actually in the database to debug the null value
-                console.log(`>>> DEBUG: User: ${session.user?.username}, DB Language: "${session.user?.defaultLang}"`);
+            
+            // 3. Synchronous: Handle Language Logic (with Fix)
+            .map((session: TempSession) => {
+                console.log(`>>> DEBUG: User: ${session?.user?.username}, DB Language: "${session?.user?.defaultLang}"`);
 
-                // 2. Force a fallback if the language is null/undefined/broken
-                const safeLang = (session.user?.defaultLang && session.user.defaultLang !== 'None') 
+                // FIX: Fallback to English if language is missing/None
+                const safeLang = (session?.user?.defaultLang && session.user.defaultLang !== 'None') 
                     ? session.user.defaultLang 
                     : 'en-US';
 
@@ -246,9 +263,10 @@ export class SessionService {
                         ...session,
                         language: lang,
                     }));
-                 // --- FIX END ---
             })
-            .chain((session) => session.toTaskEither())
+            
+            // 4. Flatten the Inner Either back to TaskEither
+            .chain((eitherSession) => eitherSession.toTaskEither())
             .mapError((err) => {
                 console.error('>>> AUTH FAILURE CAUSE:', JSON.stringify(err));
                 return createUnauthorizedError('User is not authenticated');
