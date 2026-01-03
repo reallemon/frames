@@ -202,21 +202,24 @@ export class SessionService {
             .ioSync((token) => context.addData(SESSION_COOKIE_NAME, token))
             .chain((token) => this.retrieveSession(token))
             .map((session) => {
-                // Fix: context.addData can fail if the object contains functions, 
-                // but our retrieveSession fix (stripping defaultObject) handles that.
                 context.addData(SESSION_CONTEXT_KEY, session);
                 return session;
             })
             .map((session) => {
-                // --- CRITICAL FIX: CONSTRUCT VALID CLIENT USER ---
-                // We must merge the 'browserId' from the Session into the User object
-                // because the ClientUserSchema requires it.
+                // --- FINAL FIX: STRICT SCHEMA MATCHING ---
+                // We must ONLY return the fields defined in ClientUserSchema.
+                // Any extra fields (like 'password' or 'id') will cause the Guard to fail.
+                
                 const clientUser = {
-                    ...session.user,
-                    browserId: session.browserId, 
+                    role: session.user.role,
+                    email: session.user.email,
+                    channel: session.user.channel,
+                    username: session.user.username,
+                    incognito: session.user.incognito,
+                    browserId: session.browserId, // Stitched from session
                 };
 
-                console.log(`>>> DEBUG: returning ClientUser with BrowserID: ${clientUser.browserId}`);
+                console.log(`>>> DEBUG: Sanitized User: ${JSON.stringify(clientUser)}`);
                 return clientUser;
             })
             .mapError((err) => {
