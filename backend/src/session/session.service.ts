@@ -196,16 +196,33 @@ export class SessionService {
             context.getSocketContext().user?.assigns.token ?? null;
 
         const sessionToken = token?.replace('Bearer', '').trim() || null;
-
-        if (!sessionToken) console.log('>>> AUTH DEBUG: No session token found in request');
-        else console.log('>>> AUTH DEBUG: Token found, attempting verification...');
         
+        if (!sessionToken) console.log('>>> AUTH DEBUG: No session token found in request');
+
         return TaskEither
             .fromNullable(sessionToken)
             .ioSync((token) => context.addData(SESSION_COOKIE_NAME, token))
             .chain((token) => this.retrieveSession(token))
-            .ioSync((session) => context.addData(SESSION_CONTEXT_KEY, session))
-            .map((session) => session.user);
+            .map((session) => {
+                console.log('>>> DEBUG: retrieveSession Success. Adding to context...');
+                // DEBUG: Try adding to context inside a try-catch to spot serialization errors
+                try {
+                    context.addData(SESSION_CONTEXT_KEY, session);
+                    console.log('>>> DEBUG: Context add success.');
+                } catch (e) {
+                    console.error('>>> DEBUG: CRITICAL CONTEXT ERROR:', e);
+                    throw e;
+                }
+                return session;
+            })
+            .map((session) => {
+                 console.log(`>>> DEBUG: Returning User: ${session.user.username} (Role: ${session.user.role})`);
+                 return session.user;
+            })
+            .mapError((err) => {
+                console.error('>>> DEBUG: retrieveUser FAILED chain:', err);
+                return err;
+            });
     }
 
     allowNoRulesAccess (context: AuthorizationContext) {
@@ -219,56 +236,40 @@ export class SessionService {
     }
 
     private retrieveSession (sessionToken: string) {
-        // 1. Synchronous: Verify Token & Parse Cookie
-        return Either.tryCatch(() => {
-            try {
-                return this.jwtService.verify<Cookie>(sessionToken);
-            } catch (e) {
-                console.error('>>> DEBUG: Token verification failed:', e);
-                throw e;
-            }
-        }, 'Invalid token')
-            .chain((cookie) => Either.tryCatch(() => {
-                try {
-                    return cookieSchema.parse(cookie);
-                } catch (e) {
-                    console.error('>>> DEBUG: Cookie schema validation failed:', e);
-                    throw e;
-                }
-            }, 'Invalid cookie'))
-            .toTaskEither() // <--- Convert to Async Task here
-            
-            // 2. Asynchronous: Fetch Session from Redis
+        return Either.tryCatch(() => this.jwtService.verify<Cookie>(sessionToken), 'Invalid token')
+            .chain((cookie) => Either.tryCatch(() => cookieSchema.parse(cookie), 'Invalid cookie'))
+            .toTaskEither()
             .chain(({ userId, sessionId }) => {
                 const key = `${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`;
-                console.log(`>>> DEBUG: Searching Redis for key: ${key}`);
-                return this.cacheStore.get<TempSession>(key)
-                    .mapError((e) => {
-                        console.error(`>>> DEBUG: Redis lookup failed: ${e}`);
-                        return e;
-                    });
+                return this.cacheStore.get<TempSession>(key);
             })
-            
-            // 3. Synchronous: Handle Language Logic (with Fix)
             .map((session: TempSession) => {
                 console.log(`>>> DEBUG: User: ${session?.user?.username}, DB Language: "${session?.user?.defaultLang}"`);
 
-                // FIX: Fallback to English if language is missing/None
                 const safeLang = (session?.user?.defaultLang && session.user.defaultLang !== 'None') 
                     ? session.user.defaultLang 
                     : 'en-US';
 
                 return Either.tryCatch(() => this.languageService.getLanguage(safeLang), 'Language not found')
-                    .map((lang): CachedSession => ({
-                        ...session,
-                        language: lang,
-                    }));
+                    .map((lang): CachedSession => {
+                        // FIX: Strip the 'defaultObject' function which causes serialization crashes
+                        const safeLangObj = { ...lang };
+                        delete (safeLangObj as any).defaultObject;
+
+                        return {
+                            ...session,
+                            language: safeLangObj as any,
+                        };
+                    });
             })
-            
-            // 4. Flatten the Inner Either back to TaskEither
             .chain((eitherSession) => eitherSession.toTaskEither())
+            .map((session) => {
+                console.log('>>> DEBUG: Session object fully constructed.');
+                return session;
+            })
             .mapError((err) => {
-                console.error('>>> AUTH FAILURE CAUSE:', JSON.stringify(err));
+                // Log simplified error to avoid JSON.stringify crashes
+                console.error('>>> AUTH FAILURE CAUSE:', err);
                 return createUnauthorizedError('User is not authenticated');
             });
     }
