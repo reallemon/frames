@@ -219,19 +219,34 @@ export class SessionService {
     }
 
     private retrieveSession (sessionToken: string) {
-        return Either.tryCatch(() => this.jwtService.verify<Cookie>(sessionToken), (e) => `Invalid token error: ${e}`)
+        return Either.tryCatch(() => {
+            // WRAPPED: Log error inside the execution block to satisfy TypeScript
+            try {
+                return this.jwtService.verify<Cookie>(sessionToken);
+            } catch (e) {
+                console.error('>>> DEBUG: Token verification failed:', e);
+                throw e; 
+            }
+        }, 'Invalid token') 
             .map((cookie) => {
                 console.log('>>> DEBUG: Token signature verified. Payload:', JSON.stringify(cookie));
                 return cookie;
             })
-            .chain((cookie) => Either.tryCatch(() => cookieSchema.parse(cookie), (e) => `Cookie schema mismatch: ${e}`))
+            .chain((cookie) => Either.tryCatch(() => {
+                try {
+                    return cookieSchema.parse(cookie);
+                } catch (e) {
+                    console.error('>>> DEBUG: Cookie schema validation failed:', e);
+                    throw e;
+                }
+            }, 'Invalid cookie'))
             .toTaskEither()
             .chain(({ userId, sessionId }) => {
                 const key = `${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`;
                 console.log(`>>> DEBUG: Searching Redis for key: ${key}`);
                 return this.cacheStore.get<TempSession>(key)
                     .mapError((e) => {
-                        console.error(`>>> DEBUG: Redis lookup failed or key missing. Error: ${e}`);
+                        console.error(`>>> DEBUG: Redis lookup failed. Error: ${e}`);
                         return e;
                     });
             })
@@ -245,7 +260,8 @@ export class SessionService {
             })
             .chain((session) => session.toTaskEither())
             .mapError((err) => {
-                console.error('>>> AUTH FAILURE CAUSE:', err);
+                // Log the final cause before returning the generic error
+                console.error('>>> AUTH FAILURE CAUSE:', JSON.stringify(err, null, 2));
                 return createUnauthorizedError('User is not authenticated');
             });
     }
