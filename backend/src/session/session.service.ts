@@ -36,11 +36,6 @@ export class SessionService {
 
     /**
      * @desc Create a session
-     * @param agent - The user agent of the client
-     * @param ip - The ip address of the client
-     * @param res - The response object
-     * @param user - The user to create the session for
-     * @param isSecure - Whether the session is secure or not
      */
     createSession (agent: Details, ip: string, res: Response, user: User, isSecure: boolean) {
         const validDate = user.role === Role.GUEST
@@ -66,9 +61,6 @@ export class SessionService {
 
     /**
      * @desc Remove a session
-     * @param userId - The user id to remove the session for
-     * @param sessionId - The session id to remove
-     * @param res - The response object
      */
     removeSession (userId: string, sessionId: string, res: Response) {
         return TaskEither
@@ -87,8 +79,6 @@ export class SessionService {
 
     /**
      * @desc Remove all sessions for a user
-     * @param userId - The user id to remove the sessions for
-     * @param sessionId - The session id to remove
      */
     removeOtherSessions (userId: string, sessionId: string) {
         return this.getSessionCachedKeys(userId)
@@ -108,7 +98,6 @@ export class SessionService {
 
     /**
      * @desc Remove all sessions for a user
-     * @param userId - The user id to remove the sessions for
      */
     removeUserSessions (userId: string) {
         return this.getSessionCachedKeys(userId)
@@ -124,7 +113,6 @@ export class SessionService {
 
     /**
      * @desc Update the session
-     * @param user - The user to update the session for
      */
     updateSession (user: User) {
         const cookie = (session: Session & { user: User }) => Either
@@ -154,8 +142,6 @@ export class SessionService {
 
     /**
      * @desc Get the session
-     * @param session - The session to get
-     * @param res - The response object
      */
     getSession (session: CachedSession, res: Response) {
         const deleteGuestSession = (session: CachedSession) => TaskEither
@@ -178,6 +164,7 @@ export class SessionService {
                 () => createUnauthorizedError('Guest session not allowed'),
             )
             .map((session): ClientUser => ({
+                id: session.user.id, // <--- FIX: Added ID
                 role: session.user.role,
                 email: session.user.email,
                 channel: session.user.channel,
@@ -206,27 +193,21 @@ export class SessionService {
                 return session;
             })
             .map((session) => {
-                // --- THE "GOLDILOCKS" FIX ---
-                // 1. Include 'id' (Required by Authorizer library internals)
-                // 2. Include Schema fields (role, email, browserId, etc.)
-                // 3. EXCLUDE everything else (password, created, etc.) to pass Strict Validation
-                
-                const clientUser = {
-                    id: session.user.id,          // <--- Library needs this
-                    role: session.user.role,      // <--- Schema needs this
+                // <--- FIX: "Goldilocks" User Object
+                const completeUser = {
+                    id: session.user.id,
+                    role: session.user.role,
                     email: session.user.email,
                     channel: session.user.channel,
                     username: session.user.username,
                     incognito: session.user.incognito,
-                    browserId: session.browserId, // <--- Schema needs this
+                    browserId: session.browserId,
                 };
-
-                console.log(`>>> DEBUG: Goldilocks User: ${JSON.stringify(clientUser)}`);
-                return clientUser;
-            })
-            .mapError((err) => {
-                console.error('>>> DEBUG: retrieveUser failed:', err);
-                return err;
+                
+                // Debug log to confirm
+                console.log(`>>> DEBUG: Final User ID: ${completeUser.id}, BrowserID: ${completeUser.browserId}`);
+                
+                return completeUser;
             });
     }
 
@@ -237,44 +218,35 @@ export class SessionService {
                 (context) => context.isHttp,
                 () => createUnauthorizedError('User is not authenticated'),
             )
-            .map(() => true);
+            .map(() => true); // <--- FIX: Kept as boolean, ignored ClientUser mapping
     }
 
     private retrieveSession (sessionToken: string) {
         return Either.tryCatch(() => this.jwtService.verify<Cookie>(sessionToken), 'Invalid token')
             .chain((cookie) => Either.tryCatch(() => cookieSchema.parse(cookie), 'Invalid cookie'))
             .toTaskEither()
-            .chain(({ userId, sessionId }) => {
-                const key = `${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`;
-                return this.cacheStore.get<TempSession>(key);
-            })
-            .map((session: TempSession) => {
-                console.log(`>>> DEBUG: User: ${session?.user?.username}, DB Language: "${session?.user?.defaultLang}"`);
-
-                const safeLang = (session?.user?.defaultLang && session.user.defaultLang !== 'None') 
+            .chain(({ userId, sessionId }) => this.cacheStore.get<TempSession>(`${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`))
+            .map((session) => {
+                // <--- FIX: Language Safety Check
+                const safeLang = (session.user.defaultLang && session.user.defaultLang !== 'None') 
                     ? session.user.defaultLang 
                     : 'en-US';
 
                 return Either.tryCatch(() => this.languageService.getLanguage(safeLang), 'Language not found')
                     .map((lang): CachedSession => {
-                        // FIX: Strip the 'defaultObject' function which causes serialization crashes
+                        // <--- FIX: Strip problematic functions
                         const safeLangObj = { ...lang };
                         delete (safeLangObj as any).defaultObject;
-
+                        
                         return {
                             ...session,
                             language: safeLangObj as any,
                         };
                     });
             })
-            .chain((eitherSession) => eitherSession.toTaskEither())
-            .map((session) => {
-                console.log('>>> DEBUG: Session object fully constructed.');
-                return session;
-            })
+            .chain((session) => session.toTaskEither())
             .mapError((err) => {
-                // Log simplified error to avoid JSON.stringify crashes
-                console.error('>>> AUTH FAILURE CAUSE:', err);
+                console.error('>>> AUTH DEBUG ERROR:', err);
                 return createUnauthorizedError('User is not authenticated');
             });
     }
@@ -340,6 +312,7 @@ export class SessionService {
             Math.floor((session.valid.getTime() - Date.now()) / 1000),
         )
             .map((): ClientUser => ({
+                id: session.user.id, // <--- FIX: Added ID
                 role: session.user.role,
                 email: session.user.email,
                 channel: session.user.channel,
