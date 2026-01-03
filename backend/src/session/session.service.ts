@@ -220,48 +220,37 @@ export class SessionService {
 
     private retrieveSession (sessionToken: string) {
         return Either.tryCatch(() => {
-            // WRAPPED: Log error inside the execution block to satisfy TypeScript
             try {
                 return this.jwtService.verify<Cookie>(sessionToken);
             } catch (e) {
                 console.error('>>> DEBUG: Token verification failed:', e);
-                throw e; 
+                throw e;
             }
-        }, 'Invalid token') 
-            .map((cookie) => {
-                console.log('>>> DEBUG: Token signature verified. Payload:', JSON.stringify(cookie));
-                return cookie;
-            })
-            .chain((cookie) => Either.tryCatch(() => {
-                try {
-                    return cookieSchema.parse(cookie);
-                } catch (e) {
-                    console.error('>>> DEBUG: Cookie schema validation failed:', e);
-                    throw e;
-                }
-            }, 'Invalid cookie'))
-            .toTaskEither()
+        }, 'Invalid token')
+            .chain((cookie) => Either.tryCatch(() => cookieSchema.parse(cookie), 'Invalid cookie').toTaskEither())
             .chain(({ userId, sessionId }) => {
-                const key = `${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`;
-                console.log(`>>> DEBUG: Searching Redis for key: ${key}`);
-                return this.cacheStore.get<TempSession>(key)
-                    .mapError((e) => {
-                        console.error(`>>> DEBUG: Redis lookup failed. Error: ${e}`);
-                        return e;
-                    });
+                return this.cacheStore.get<TempSession>(`${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`);
             })
             .map((session) => {
-                console.log('>>> DEBUG: Session found in Redis. Fetching language...');
-                return Either.tryCatch(() => this.languageService.getLanguage(session.user.defaultLang), 'Language not found')
+                // --- FIX START: Safe Language Handling ---
+                // 1. Log what is actually in the database to debug the null value
+                console.log(`>>> DEBUG: User: ${session.user?.username}, DB Language: "${session.user?.defaultLang}"`);
+
+                // 2. Force a fallback if the language is null/undefined/broken
+                const safeLang = (session.user?.defaultLang && session.user.defaultLang !== 'None') 
+                    ? session.user.defaultLang 
+                    : 'en-US';
+
+                return Either.tryCatch(() => this.languageService.getLanguage(safeLang), 'Language not found')
                     .map((lang): CachedSession => ({
                         ...session,
                         language: lang,
                     }));
+                 // --- FIX END ---
             })
             .chain((session) => session.toTaskEither())
             .mapError((err) => {
-                // Log the final cause before returning the generic error
-                console.error('>>> AUTH FAILURE CAUSE:', JSON.stringify(err, null, 2));
+                console.error('>>> AUTH FAILURE CAUSE:', JSON.stringify(err));
                 return createUnauthorizedError('User is not authenticated');
             });
     }
