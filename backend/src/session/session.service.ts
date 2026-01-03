@@ -206,18 +206,23 @@ export class SessionService {
                 return session;
             })
             .map((session) => {
-                // --- FINAL FIX: MERGE OBJECTS ---
-                // 1. Keep ALL properties from the Database User (id, role, password, etc.)
-                //    so the Authorizer library is happy.
-                // 2. Add 'browserId' from the Session so clientUserSchema is happy.
+                // --- THE "GOLDILOCKS" FIX ---
+                // 1. Include 'id' (Required by Authorizer library internals)
+                // 2. Include Schema fields (role, email, browserId, etc.)
+                // 3. EXCLUDE everything else (password, created, etc.) to pass Strict Validation
                 
-                const completeUser = {
-                    ...session.user,
-                    browserId: session.browserId,
+                const clientUser = {
+                    id: session.user.id,          // <--- Library needs this
+                    role: session.user.role,      // <--- Schema needs this
+                    email: session.user.email,
+                    channel: session.user.channel,
+                    username: session.user.username,
+                    incognito: session.user.incognito,
+                    browserId: session.browserId, // <--- Schema needs this
                 };
 
-                console.log(`>>> DEBUG: Final User Object (ID: ${completeUser.id}, BrowserID: ${completeUser.browserId})`);
-                return completeUser;
+                console.log(`>>> DEBUG: Goldilocks User: ${JSON.stringify(clientUser)}`);
+                return clientUser;
             })
             .mapError((err) => {
                 console.error('>>> DEBUG: retrieveUser failed:', err);
