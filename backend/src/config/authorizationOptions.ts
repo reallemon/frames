@@ -5,7 +5,7 @@ export const authorizationOptions: AsyncMetadata = {
     inject: [SessionService],
     useFactory: (sessionService: SessionService): Authenticator => ({
         allowNoRulesAccess: (context) => sessionService.allowNoRulesAccess(context),
-        // FIX: Cast to 'any' to satisfy the compiler while sending the sanitized user to the validator
+        // Keep 'as any' to allow our hybrid object (Prisma User + browserId) to pass
         retrieveUser: (context) => sessionService.retrieveUser(context) as any,
     })
 }
