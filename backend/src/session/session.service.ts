@@ -219,18 +219,33 @@ export class SessionService {
     }
 
     private retrieveSession (sessionToken: string) {
-        return Either.tryCatch(() => this.jwtService.verify<Cookie>(sessionToken), 'Invalid token')
-            .chain((cookie) => Either.tryCatch(() => cookieSchema.parse(cookie), 'Invalid cookie'))
+        return Either.tryCatch(() => this.jwtService.verify<Cookie>(sessionToken), (e) => `Invalid token error: ${e}`)
+            .map((cookie) => {
+                console.log('>>> DEBUG: Token signature verified. Payload:', JSON.stringify(cookie));
+                return cookie;
+            })
+            .chain((cookie) => Either.tryCatch(() => cookieSchema.parse(cookie), (e) => `Cookie schema mismatch: ${e}`))
             .toTaskEither()
-            .chain(({ userId, sessionId }) => this.cacheStore.get<TempSession>(`${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`))
-            .map((session) => Either.tryCatch(() => this.languageService.getLanguage(session.user.defaultLang), 'Language not found')
-                .map((lang): CachedSession => ({
-                    ...session,
-                    language: lang,
-                })))
+            .chain(({ userId, sessionId }) => {
+                const key = `${SESSION_CACHE_PREFIX}:${userId}:${sessionId}`;
+                console.log(`>>> DEBUG: Searching Redis for key: ${key}`);
+                return this.cacheStore.get<TempSession>(key)
+                    .mapError((e) => {
+                        console.error(`>>> DEBUG: Redis lookup failed or key missing. Error: ${e}`);
+                        return e;
+                    });
+            })
+            .map((session) => {
+                console.log('>>> DEBUG: Session found in Redis. Fetching language...');
+                return Either.tryCatch(() => this.languageService.getLanguage(session.user.defaultLang), 'Language not found')
+                    .map((lang): CachedSession => ({
+                        ...session,
+                        language: lang,
+                    }));
+            })
             .chain((session) => session.toTaskEither())
             .mapError((err) => {
-                console.error('>>> AUTH DEBUG ERROR:', JSON.stringify(err, null, 2));
+                console.error('>>> AUTH FAILURE CAUSE:', err);
                 return createUnauthorizedError('User is not authenticated');
             });
     }
