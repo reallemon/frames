@@ -25,9 +25,8 @@ WORKDIR /usr/src/app
 COPY backend/package*.json ./
 COPY backend/prisma ./prisma/
 
-RUN npm ci --omit=dev && \
-    npx prisma generate && \
-    npm prune --production
+RUN npm ci && \
+    npx prisma generate
 
 FROM binstall AS bbuild
 
