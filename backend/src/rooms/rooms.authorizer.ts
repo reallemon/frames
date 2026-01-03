@@ -59,7 +59,7 @@ export class RoomsAuthorizer implements WillAuthorize {
         const roomRules = rules.filter((rule) => rule.resource === 'Room');
         const [leastPermissive] = sortActions(roomRules.map((rule) => rule.action));
 
-        if (roomId === null && (leastPermissive === undefined || leastPermissive === Action.Create)) {
+        if (!roomId && (leastPermissive === undefined || leastPermissive === Action.Create)) {
             return TaskEither.of(true);
         }
 
