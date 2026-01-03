@@ -51,7 +51,7 @@ ENV DOCKER_IMAGE_ARCH=$IMAGE_ARCH
 ENV NODE_ENV=production
 
 # Install only necessary runtime dependencies
-RUN apk add --no-cache bash ffmpeg
+RUN apk add --no-cache bash ffmpeg tzdata
 
 RUN addgroup --system --gid 1001 nestgroup && \
     adduser --system --uid 1001 nestuser --ingroup nestgroup
