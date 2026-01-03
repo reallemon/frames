@@ -226,7 +226,10 @@ export class SessionService {
                     language: lang,
                 })))
             .chain((session) => session.toTaskEither())
-            .mapError(() => createUnauthorizedError('User is not authenticated'));
+            .mapError((err) => {
+                console.error('>>> AUTH DEBUG ERROR:', JSON.stringify(err, null, 2));
+                return createUnauthorizedError('User is not authenticated');
+            });
     }
 
     private writeHttpCookie (res: Response, token: string, isSecure: boolean) {
