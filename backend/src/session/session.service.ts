@@ -202,6 +202,8 @@ export class SessionService {
                     username: session.user.username,
                     incognito: session.user.incognito,
                     browserId: session.browserId,
+                    revoked: session.user.revoked,           // ADD THIS
+                    confirmedEmail: session.user.confirmedEmail,  // ADD THIS
                 };
                 
                 // Debug log to confirm
