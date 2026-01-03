@@ -24,6 +24,7 @@ export const cookieSchema = z.object({
 });
 
 const clientUserSchema = z.object({
+    id: z.string(),  // <--- ADD THIS LINE
     role: z.nativeEnum(Role)
         .describe('The role of the user'),
     email: z.string().email()
@@ -50,6 +51,13 @@ export type TempSession = Session & { user: User };
 export type CachedSession = Session & { user: User, language: LanguageReturn };
 
 export class ClientUserSchema {
+    @IsString()
+    @ApiProperty({
+        description: 'The id of the user',
+        type: 'string',
+    })
+    id: string;
+    
     @ApiProperty({
         description: 'The role of the user',
         'enum': Role,
