@@ -206,21 +206,18 @@ export class SessionService {
                 return session;
             })
             .map((session) => {
-                // --- FINAL FIX: STRICT SCHEMA MATCHING ---
-                // We must ONLY return the fields defined in ClientUserSchema.
-                // Any extra fields (like 'password' or 'id') will cause the Guard to fail.
+                // --- FINAL FIX: MERGE OBJECTS ---
+                // 1. Keep ALL properties from the Database User (id, role, password, etc.)
+                //    so the Authorizer library is happy.
+                // 2. Add 'browserId' from the Session so clientUserSchema is happy.
                 
-                const clientUser = {
-                    role: session.user.role,
-                    email: session.user.email,
-                    channel: session.user.channel,
-                    username: session.user.username,
-                    incognito: session.user.incognito,
-                    browserId: session.browserId, // Stitched from session
+                const completeUser = {
+                    ...session.user,
+                    browserId: session.browserId,
                 };
 
-                console.log(`>>> DEBUG: Sanitized User: ${JSON.stringify(clientUser)}`);
-                return clientUser;
+                console.log(`>>> DEBUG: Final User Object (ID: ${completeUser.id}, BrowserID: ${completeUser.browserId})`);
+                return completeUser;
             })
             .mapError((err) => {
                 console.error('>>> DEBUG: retrieveUser failed:', err);
